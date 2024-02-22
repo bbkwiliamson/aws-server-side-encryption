@@ -54,6 +54,29 @@ def BucketEncryption(client, s3_array):
             print("Notification Function Successfully triggered and send buckets with no encryption")
             return SNSResult
 
+# the below line of code was commented because the team did not want to enforce it, but rather just inform the relevant teams as we used shared accounts.
+     # for s3Encrypt in no_encryption:
+     #     try:
+     #         response = client.put_bucket_encryption(
+     #                            Bucket= s3Encrypt,
+     #                            #ContentMD5='string',
+     #                            ChecksumAlgorithm='SHA256',
+     #                            ServerSideEncryptionConfiguration={
+     #                            'Rules': [
+     #                                   {
+     #                                      'ApplyServerSideEncryptionByDefault': {
+     #                                       'SSEAlgorithm': 'aws:kms',
+     #                                        'KMSMasterKeyID': '1234abcd-12ab-34cd-56ef-1234567890ab'
+     #                                     },
+     #                                      'BucketKeyEnabled': True
+     #                                    },
+     #                                    ]
+     #                                       },
+     #                                 ExpectedBucketOwner=AccountID['Account']
+     #                                   )
+
+     #     except Exception as e:
+     #        print("failed to put encryption on the buckets because of this error :", e):
 
 
 
