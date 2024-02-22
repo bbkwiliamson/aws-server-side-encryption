@@ -1,0 +1,176 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: creating a lambda function for automating the s3 encryption notification and the lambda role
+
+Parameters:
+  Team:
+    Type: String
+    Description: the name of the team
+
+  TeamEmail:
+    Type: String
+    Description: team e-mail address
+
+  Env:
+    Type: String
+    Default: dev
+    Description: Environment the resources/ stack is deployed to
+    AllowedValues:
+      - "dev"
+      - "sit"
+      - "prod"
+
+Resources:
+  BoundedLambdaS3EncryptionRole: #creation of lambda function role
+    Type: 'AWS::IAM::Role'
+    Properties:
+      RoleName: "Bounded-Lambda-S3-encryption-policy"
+      PermissionsBoundary: !Sub "arn:aws:iam::${AWS::AccountId}:policy/BoundedPermissionsPolicy"
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Path: "/bounded/"
+      Policies:
+        - PolicyName: "Lambda-S3-encryption-role-policy"
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action: 
+                 - "s3:GetObject"
+                Resource: !Sub "arn:aws:s3:::lambda-function-s3-${AWS::AccountId}-encryption-python-zipfile-${Env}/*"
+              - Effect: Allow
+                Action:
+                  - "s3:ListBucket"
+                  - "s3:ListAllMyBuckets"
+                  - "s3:GetEncryptionConfiguration"
+                  - "s3:PutBucketNotification"
+                  - "s3:PutEncryptionConfiguration"
+                Resource: !Sub "arn:aws:s3:::*"
+              - Effect: Allow
+                Action:
+                  - "sns:*"
+                Resource: !Sub "arn:aws:sns:${AWS::Region}:${AWS::AccountId}:SNS_Notification_for_S3Encryption"
+      
+  
+  #creation of lambda function
+  LambdaS3EncryptionFunction:
+     Type: AWS::Lambda::Function
+     Properties:
+        FunctionName: Lambda-S3-encryption-notification-Function
+        Role: !GetAtt "BoundedLambdaS3EncryptionRole.Arn"
+        Runtime: python3.9
+        Handler: s3-encryption.lambda_handler
+        Timeout: 60
+        Description: A Lambda function that will check for encryption on each bucket
+        MemorySize: 160
+        Code: #getting the lambda python file code from the specified bucket
+      
+          S3Bucket: !Sub lambda-function-s3-${AWS::AccountId}-encryption-python-zipfile-${Env}
+          S3Key: s3-encryption.zip
+        Tags:
+          - Key: GroupName
+            Value: 'SGB-DevOps'
+          - Key: Environment
+            Value: !Ref Env
+          - Key: Team-Email
+            Value: 'example@example.com'
+          - Key: Tier
+            Value: 'MCA'
+  
+  #creation of lambda function log group
+  LambdaFunctionLogGroup:
+    Type: "AWS::Logs::LogGroup"
+    Properties: 
+      RetentionInDays: 1
+      LogGroupName: !Join ["", ["/aws/lambda/", !Ref LambdaS3EncryptionFunction]]    
+      Tags:
+        - Key: GroupName
+          Value: 'SGB-DevOps'
+        - Key: Environment
+          Value: !Ref Env
+        - Key: Team-Email
+          Value: 'example@example.com'
+        - Key: Tier
+          Value: 'MCA'   
+
+  ScheduledEventRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Description: ScheduledRule/ event to trigger the lambda function
+      Name: lambda-s3-lifecycle-s3-rule-trigger
+      EventPattern:
+        source:
+         - "aws.s3"
+        detail:
+          eventSource:
+            - "s3.amazonaws.com"
+          eventName:
+           - "CreateBucket"
+      State: ENABLED
+      Targets: 
+       - Arn: !GetAtt LambdaS3EncryptionFunction.Arn
+         Id: !Ref "LambdaS3EncryptionFunction"
+         
+  # creating a role that will be assumed by event scheduler after 1 week to trigger lambda function
+  BoundedScheduleRole: #creation of lambda function role
+    Type: 'AWS::IAM::Role'
+    Properties:
+      RoleName: "Bounded-Schedule-trigger-for-Lambda-Encryption-role"
+      PermissionsBoundary: !Sub "arn:aws:iam::${AWS::AccountId}:policy/BoundedPermissionsPolicy"
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - scheduler.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Path: "/bounded/"
+      Policies:
+        - PolicyName: "Schedule-trigger-for-Lambda-s3-Encryption-policy"
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action: 
+                 - "lambda:InvokeFunction"
+                Resource: !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:Lambda-S3-encryption-notification-Function"
+
+  MyRateLimitedRule:
+    Type: AWS::Scheduler::Schedule
+    Properties:
+      Description: the Lambda function to be triggered once every week
+      ScheduleExpression: "cron(30 6 ? * tue *)" 
+      FlexibleTimeWindow:
+        MaximumWindowInMinutes: 10
+        Mode: FLEXIBLE
+      State: ENABLED
+      Target:
+        Arn: !GetAtt LambdaS3EncryptionFunction.Arn
+        RoleArn: !GetAtt BoundedScheduleRole.Arn
+
+  PermissionForEventsToInvokeLambda:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref LambdaS3EncryptionFunction
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt ScheduledEventRule.Arn
+
+
+  PermissionForScheduleToInvokeLambda:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref LambdaS3EncryptionFunction
+      Action: lambda:InvokeFunction
+      Principal: scheduler.amazonaws.com
+      SourceArn: !GetAtt MyRateLimitedRule.Arn
+  
+          
